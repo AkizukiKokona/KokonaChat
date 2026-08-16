@@ -1,0 +1,42 @@
+[package]
+name = "kokonachat"
+version = "0.1.0"
+edition = "2021"
+description = "KokonaChat - 去中心化 P2P 即时通讯原型（IPv6/UDP 直连 + 端到端加密 + 被动寻址）"
+license = "MIT"
+
+[[bin]]
+name = "kokonachat"
+path = "src/main.rs"
+
+[dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "net", "time", "sync", "macros"] }
+ratatui = "0.29"
+crossterm = "0.28"
+ed25519-dalek = { version = "2", features = ["std"] }
+x25519-dalek = { version = "2", features = ["static_secrets", "reusable_secrets"] }
+curve25519-dalek = "4"
+aes-gcm = "0.10"
+hkdf = "0.12"
+sha2 = "0.10"
+rand = "0.8"
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+clap = { version = "4", features = ["derive"] }
+dirs = "5"
+socket2 = { version = "0.5", features = ["all"] }
+anyhow = "1"
+log = "0.4"
+env_logger = "0.11"
+hex = "0.4"
+chrono = { version = "0.4", features = ["clock"] }
+local-ip-address = "0.6"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+
+[profile.dev]
+opt-level = 1
