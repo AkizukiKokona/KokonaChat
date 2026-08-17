@@ -522,6 +522,11 @@ fn profile_page(ui: &mut egui::Ui, app: &mut ChatApp) {
                     app.show_profile = false;
                 }
                 ui.label(RichText::new("个人资料").size(15.0).strong());
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if new_button(ui, "扫描二维码").clicked() {
+                        app.show_scan = true;
+                    }
+                });
             });
         });
 
@@ -783,6 +788,58 @@ fn modals(ui: &mut egui::Ui, app: &mut ChatApp) {
             }
         });
     }
+
+    // 扫描二维码
+    if app.show_scan {
+        egui::Modal::new(egui::Id::new("scan_modal")).show(ui.ctx(), |ui| {
+            ui.label(RichText::new("扫描二维码").size(14.0).strong());
+            ui.add_space(4.0);
+            ui.add(egui::Label::new(
+                RichText::new("选择识别方式：从图片中解析加好友二维码（kokonachat://add?..）").weak().size(12.0),
+            ).wrap());
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                if ui.button("调用系统相机实时拍照").clicked() {
+                    app.push_status("桌面端暂不支持实时相机扫描，请使用“从图库选图”识别二维码".into());
+                }
+                if ui.button("从图库选取图片识别").clicked() {
+                    if let Some(p) = rfd::FileDialog::new()
+                        .add_filter("图片", &["png", "jpg", "jpeg", "bmp", "gif", "webp"])
+                        .pick_file()
+                    {
+                        match scan_qr_from_path(&p) {
+                            Some(link) => match app.add_friend_from_link(&link) {
+                                Ok(()) => {
+                                    app.push_status(format!("已添加好友：{:?}", p.file_name()));
+                                    app.show_scan = false;
+                                }
+                                Err(e) => app.push_status(format!("扫码失败：{e}")),
+                            },
+                            None => app.push_status("未在图片中识别到二维码，请换一张更清晰的图片".into()),
+                        }
+                    }
+                }
+            });
+            ui.add_space(8.0);
+            if ui.button("取消").clicked() {
+                app.show_scan = false;
+            }
+        });
+    }
+}
+
+/// 从图片文件中解码二维码（返回第一个识别到的文本）。
+fn scan_qr_from_path(path: &std::path::Path) -> Option<String> {
+    let img = image::open(path).ok()?;
+    let mut prepared = rqrr::PreparedImage::prepare(img.to_luma8());
+    for grid in prepared.detect_grids() {
+        if let Ok((_, content)) = grid.decode() {
+            if !content.trim().is_empty() {
+                return Some(content.trim().to_string());
+            }
+        }
+    }
+    None
 }
 
 /// 生成二维码点阵（(宽度, 逐行 dark 标记)）。
@@ -910,4 +967,35 @@ fn mobile_chat(ui: &mut egui::Ui, app: &mut ChatApp) {
             app.send_current();
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn qr_scan_roundtrip() {
+        let text = "kokonachat://add?nickname=test&pubkey=abcd&ip=1.2.3.4";
+        let tmp = std::env::temp_dir().join("kokona_qr_scan_test.png");
+        let qr = qr_code::QrCode::new(text.as_bytes()).unwrap();
+        let w = qr.width();
+        let cells = qr.to_vec();
+        let scale = 10u32;
+        let size = w as u32 * scale;
+        let mut img = image::GrayImage::new(size, size);
+        for (i, dark) in cells.iter().enumerate() {
+            let px = (i % w) as u32;
+            let py = (i / w) as u32;
+            let v = if *dark { 0u8 } else { 255u8 };
+            for dy in 0..scale {
+                for dx in 0..scale {
+                    img.put_pixel(px * scale + dx, py * scale + dy, image::Luma([v]));
+                }
+            }
+        }
+        img.save(&tmp).unwrap();
+        let got = scan_qr_from_path(&tmp).unwrap();
+        assert_eq!(got, text);
+        std::fs::remove_file(&tmp).ok();
+    }
 }

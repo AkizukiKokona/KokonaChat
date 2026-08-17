@@ -37,9 +37,10 @@ egui-winit = "0.36.1"
 egui-wgpu = { version = "0.36.1", features = ["winit"] }
 winit = "0.30.13"
 pollster = "1.0.1"
-image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "bmp", "gif", "webp"] }
 rfd = "0.15"
 qr_code = "2"
+rqrr = "0.7"
 
 [profile.release]
 opt-level = 3

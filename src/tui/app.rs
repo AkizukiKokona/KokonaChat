@@ -104,6 +104,8 @@ pub struct App {
     pub warn_attach: Option<AttachDraft>,
     /// 二维码弹窗是否打开。
     pub show_qr: bool,
+    /// “扫描二维码”弹窗是否打开。
+    pub show_scan: bool,
     pub avatar_feature: bool,
     pub media_feature: bool,
     pub file_feature: bool,
@@ -158,6 +160,7 @@ impl App {
             seed_input: String::new(),
             warn_attach: None,
             show_qr: false,
+            show_scan: false,
             avatar_feature: cfg.avatar_feature,
             media_feature: cfg.media_feature,
             file_feature: cfg.file_feature,
@@ -301,6 +304,33 @@ impl App {
         } else {
             String::new()
         }
+    }
+
+    /// 解析扫码/链接得到的加好友链接并写入好友列表。
+    /// 返回错误信息给调用方展示（成功返回空串）。
+    pub fn add_friend_from_link(&mut self, url: &str) -> Result<(), String> {
+        let invite = crate::deeplink::parse_url(url).map_err(|e| format!("链接无效: {e}"))?;
+        let pk = invite.pubkey();
+        let own = id::decode(&self.own_id).map_err(|e| format!("本机身份异常: {e}"))?;
+        if pk == own {
+            return Err("二维码里的用户就是本机账户，不能添加自己".into());
+        }
+        {
+            let mut store = self.store.lock().unwrap();
+            if store.contains(&pk) {
+                return Ok(());
+            }
+            match &invite {
+                crate::deeplink::Invite::Add { nickname, pubkey, ip } => {
+                    store.add(nickname.clone(), *pubkey, ip.clone()).map_err(|e| format!("添加失败: {e}"))?;
+                }
+                crate::deeplink::Invite::Talk { .. } => {
+                    return Err("这是“开始聊天”链接，不是加好友链接".into());
+                }
+            }
+        }
+        self.push_status("已通过扫码添加好友".into());
+        Ok(())
     }
 
     /// 选择附件后调用：注册大文件警告（需确认）或直接发送。
