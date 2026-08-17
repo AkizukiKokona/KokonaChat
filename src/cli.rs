@@ -32,6 +32,28 @@ pub enum Command {
         #[command(subcommand)]
         action: FriendAction,
     },
+    /// 配置管理（公网 IPv4 稳定地址模式）
+    Config {
+        #[command(subcommand)]
+        action: ConfigAction,
+    },
+    /// 备份与恢复（身份绑定加密；配置+好友与聊天记录可分开或合并）
+    Backup {
+        #[command(subcommand)]
+        action: BackupAction,
+    },
+    /// 生成加好友邀请链接（并确保 kokonachat:// 协议已注册，可被链接拉起）
+    Link,
+    /// kokonachat:// 协议管理（免安装注册，Windows 当前用户 / Linux 用户级 .desktop）
+    Protocol {
+        #[command(subcommand)]
+        action: ProtocolAction,
+    },
+    /// 处理链接：读取 kokonachat:// 邀请，添加好友或定位好友（点击链接时由系统拉起）
+    Handle {
+        /// kokonachat:// 开头的链接（如 kokonachat://add?nickname=..&pubkey=..&ip=..）
+        url: String,
+    },
     /// 启动客户端（默认 TUI；--debug 时进入终端调试聊天模式）
     Start {
         /// 监听端口（默认 1212）
@@ -40,6 +62,18 @@ pub enum Command {
         /// 消息发送失败后自动向共同好友寻址
         #[arg(long)]
         auto_addr: bool,
+    },
+    /// 启动原生图形界面（winit + egui + wgpu，浅色主题；与 TUI 共用聊天数据）
+    Gui {
+        /// 监听端口（默认 1212）
+        #[arg(long)]
+        port: Option<u16>,
+        /// 消息发送失败后自动向共同好友寻址
+        #[arg(long)]
+        auto_addr: bool,
+        /// 移动端 UI 预览（竖屏手机比例窗口，在电脑上查看移动端布局效果）
+        #[arg(long)]
+        mobile: bool,
     },
 }
 
@@ -56,4 +90,51 @@ pub enum FriendAction {
     },
     /// 列出好友
     List,
+}
+
+#[derive(Subcommand)]
+pub enum ConfigAction {
+    /// 设置公网 IPv4 为稳定地址（之后不再重复广播本机地址，好友也无需反复寻址）
+    SetPublicIpv4 {
+        /// 公网 IPv4（可带端口，如 1.2.3.4:1212；存储时只保留 IP）
+        ip: String,
+    },
+    /// 清除公网 IPv4（回到默认动态通告模式）
+    ClearPublicIpv4,
+    /// 显示当前配置
+    Show,
+}
+
+#[derive(Subcommand)]
+pub enum ProtocolAction {
+    /// 注册 kokonachat:// 协议（免安装，无需管理员）
+    Install,
+    /// 注销 kokonachat:// 协议
+    Uninstall,
+    /// 查询 kokonachat:// 是否已注册
+    Status,
+}
+
+#[derive(Subcommand)]
+pub enum BackupAction {
+    /// 导出配置 + 好友列表（单独一个备份文件）
+    ExportCore {
+        /// 输出文件路径
+        path: PathBuf,
+    },
+    /// 导出聊天记录（单独一个备份文件）
+    ExportChat {
+        /// 输出文件路径
+        path: PathBuf,
+    },
+    /// 导出全部（配置+好友+聊天记录合并成一个加密大包）
+    ExportAll {
+        /// 输出文件路径
+        path: PathBuf,
+    },
+    /// 导入备份（自动识别类型；仅本账户身份可解密）
+    Import {
+        /// 备份文件路径
+        path: PathBuf,
+    },
 }

@@ -216,6 +216,16 @@ impl Mirror {
             NetEvent::MessageFailed { to, seq } => {
                 println!("- 发送失败 [{}] seq={seq}（无响应），可在对方恢复后重发或寻址", self.nick(&to));
             }
+            NetEvent::AttachReceived { from, kind, name, data, ts } => {
+                let nick = self.nick(&from);
+                println!("<<< {} [{nick}] 收到附件: {name}（kind={kind}，{} 字节）", crate::util::format_time(ts), data.len());
+            }
+            NetEvent::AttachAcked { to, .. } => {
+                println!("+ 附件已送达 [{}]", self.nick(&to));
+            }
+            NetEvent::AttachFailed { to, .. } => {
+                println!("- 附件发送失败 [{}]", self.nick(&to));
+            }
             NetEvent::AddrResult { target, found, count } => {
                 println!("@ 寻址结果: {} {}", self.nick(&target), if found { "命中" } else { "未命中" });
                 println!("   已询问 {count} 位共同好友");

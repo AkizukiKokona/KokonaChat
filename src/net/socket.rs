@@ -72,6 +72,53 @@ pub fn fmt_addr(addr: SocketAddr) -> String {
     }
 }
 
+/// 地址是否适合对外通告/存储（可达性判断）。
+/// 过滤掉不可路由/不可达的地址，保留 loopback（本机多实例联调用）、
+/// 公网 v4、全局 v6 及内网 v4（同一局域网内可达）。
+pub fn filter_reachable(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v) => {
+            !v.is_unspecified()
+                && !v.is_multicast() // 224.0.0.0/4
+                && !v.is_link_local() // 169.254.0.0/16
+        }
+        IpAddr::V6(v) => {
+            let seg = v.segments();
+            let first = seg[0];
+            let second = seg[1];
+            !v.is_unspecified()
+                && !v.is_multicast() // ff00::/8
+                // fe80::/10 link-local（无 zone id 不可用）
+                && !(first == 0xfe80)
+                // fc00::/7 ULA（不可跨路由）
+                && !(first == 0xfc00 || first == 0xfd00)
+                // 未指派的 0x0000 前缀中非 loopback 的（如 ::ffff 已由 mapped 单独处理）
+                && (first != 0x0000 || second != 0x0000 || seg[2] != 0 || seg[3] != 1)
+        }
+    }
+}
+
+/// 判断是否为公网（全局）IPv4 地址。
+/// 排除回环 / 链路本地 / 多播 / 未指定 / 内网私有 (RFC1918) / CGNAT (RFC6598)。
+pub fn is_public_v4(ip: Ipv4Addr) -> bool {
+    let v = u32::from_be_bytes(ip.octets());
+    let in_net = |net: u32, prefix: u8| {
+        let mask = if prefix == 0 { 0 } else { u32::MAX << (32 - prefix) };
+        (v & mask) == (net & mask)
+    };
+    !ip.is_loopback()
+        && !ip.is_multicast()
+        && !ip.is_unspecified()
+        && !ip.is_link_local() // 169.254.0.0/16
+        && !ip.is_private() // RFC1918: 10/8、172.16/12、192.168/16
+        && !in_net(0x6440_0000, 10) // 100.64.0.0/10 CGNAT
+}
+
+/// 格式化 `IP:port` / `[v6]:port`（端口为 UDP 监听端口，动态通告必须携带）。
+pub fn fmt_ip_port(ip: IpAddr, port: u16) -> String {
+    SocketAddr::new(ip, port).to_string()
+}
+
 /// 解析 "ip" / "ip:port" / "[v6]:port" / "::v6:port"（无方括号的 IPv6 + 端口），缺省端口用 default_port。
 pub fn parse_sockaddr(s: &str, default_port: u16) -> Result<SocketAddr> {
     let text = s.trim();
@@ -122,5 +169,48 @@ mod tests {
     fn fmt_addr_keeps_port() {
         assert_eq!(fmt_addr("1.2.3.4:9999".parse().unwrap()), "1.2.3.4:9999");
         assert_eq!(fmt_addr("[2001:db8::1]:7777".parse().unwrap()), "[2001:db8::1]:7777");
+    }
+
+    #[test]
+    fn filter_reachable_classifies() {
+        use std::net::{Ipv4Addr, Ipv6Addr};
+        // 应过滤
+        assert!(!filter_reachable(IpAddr::V6(Ipv6Addr::new(0xfe80, 0, 0, 0, 0, 0, 0, 1)))); // link-local
+        assert!(!filter_reachable(IpAddr::V6(Ipv6Addr::new(0xfc00, 0, 0, 0, 0, 0, 0, 1)))); // ULA
+        assert!(!filter_reachable(IpAddr::V6(Ipv6Addr::new(0xff00, 0, 0, 0, 0, 0, 0, 1)))); // 多播
+        assert!(!filter_reachable(IpAddr::V4(Ipv4Addr::new(169, 254, 0, 1)))); // 链路本地
+        assert!(!filter_reachable(IpAddr::V4(Ipv4Addr::new(224, 0, 0, 1)))); // 多播
+        assert!(!filter_reachable(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)))); // 未指定
+        assert!(!filter_reachable(IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 0)))); // :: 未指定
+        // 应保留
+        assert!(filter_reachable(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)))); // loopback（联调）
+        assert!(filter_reachable(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 5)))); // 内网（局域网可达）
+        assert!(filter_reachable(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8))));
+        assert!(filter_reachable(IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1))));
+        assert!(filter_reachable(IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1)))); // ::1
+    }
+
+    #[test]
+    fn fmt_ip_port_variants() {
+        use std::net::{Ipv4Addr, Ipv6Addr};
+        assert_eq!(fmt_ip_port(IpAddr::V4(Ipv4Addr::new(1, 2, 3, 4)), 1212), "1.2.3.4:1212");
+        assert_eq!(fmt_ip_port(IpAddr::V6(Ipv6Addr::new(0x240e, 0, 0, 0, 0, 0, 0, 1)), 1212), "[240e::1]:1212");
+    }
+
+    #[test]
+    fn public_v4_classification() {
+        use std::net::Ipv4Addr;
+        // 公网
+        assert!(is_public_v4(Ipv4Addr::new(8, 8, 8, 8)));
+        assert!(is_public_v4(Ipv4Addr::new(1, 2, 3, 4)));
+        assert!(is_public_v4(Ipv4Addr::new(203, 0, 113, 5)));
+        // 内网/保留
+        assert!(!is_public_v4(Ipv4Addr::new(10, 0, 0, 1)));
+        assert!(!is_public_v4(Ipv4Addr::new(172, 16, 0, 1)));
+        assert!(!is_public_v4(Ipv4Addr::new(192, 168, 1, 1)));
+        assert!(!is_public_v4(Ipv4Addr::new(100, 64, 0, 1))); // CGNAT
+        assert!(!is_public_v4(Ipv4Addr::new(169, 254, 0, 1)));
+        assert!(!is_public_v4(Ipv4Addr::new(127, 0, 0, 1)));
+        assert!(!is_public_v4(Ipv4Addr::new(224, 0, 0, 1))); // 多播
     }
 }

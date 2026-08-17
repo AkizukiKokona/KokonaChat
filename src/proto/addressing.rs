@@ -74,7 +74,7 @@ pub fn encode_addr_answer(target_id: &[u8; 32], nonce_q: &[u8; 16], ips: &[Strin
     out.extend_from_slice(&cnt.to_be_bytes());
     for ip in ips.iter().take(cnt as usize) {
         let b = ip.as_bytes();
-        let af: u8 = if ip.contains(':') { 6 } else { 4 };
+        let af: u8 = if addr_is_v6(ip) { 6 } else { 4 };
         out.push(af);
         out.push(b.len() as u8);
         out.extend_from_slice(b);
@@ -105,7 +105,7 @@ pub fn decode_addr_answer(buf: &[u8]) -> Result<AddrAnswer> {
             bail!("寻址应答长度不匹配");
         }
         let s = String::from_utf8_lossy(&buf[off + 2..off + 2 + len]).into_owned();
-        if (af == 4 || af == 6) && s.parse::<std::net::IpAddr>().is_ok() {
+        if (af == 4 || af == 6) && addr_str_valid(&s) {
             ips.push(s);
         }
         off += 2 + len;
@@ -114,6 +114,22 @@ pub fn decode_addr_answer(buf: &[u8]) -> Result<AddrAnswer> {
 }
 
 // ---------- IP 列表通用编解码 ----------
+// 注意：条目允许"纯 IP"或"IP:端口"/"[v6]:端口"（动态通告携带端口是关键信息），
+// 均须用 SocketAddr/IpAddr 双解析校验，否则带端口的条目会被误判丢弃。
+
+fn addr_is_v6(s: &str) -> bool {
+    if let Ok(sa) = s.parse::<std::net::SocketAddr>() {
+        return sa.is_ipv6();
+    }
+    if let Ok(ip) = s.parse::<std::net::IpAddr>() {
+        return ip.is_ipv6();
+    }
+    s.contains(':')
+}
+
+fn addr_str_valid(s: &str) -> bool {
+    s.parse::<std::net::SocketAddr>().is_ok() || s.parse::<std::net::IpAddr>().is_ok()
+}
 
 fn encode_ips(ips: &[String]) -> Vec<u8> {
     let mut out = Vec::new();
@@ -121,7 +137,7 @@ fn encode_ips(ips: &[String]) -> Vec<u8> {
     out.extend_from_slice(&cnt.to_be_bytes());
     for ip in ips.iter().take(cnt as usize) {
         let b = ip.as_bytes();
-        let af: u8 = if ip.contains(':') { 6 } else { 4 };
+        let af: u8 = if addr_is_v6(ip) { 6 } else { 4 };
         out.push(af);
         out.push(b.len() as u8);
         out.extend_from_slice(b);
@@ -146,7 +162,7 @@ fn decode_ips(buf: &[u8], off: usize) -> Result<(Vec<String>, usize)> {
             bail!("IP 列表长度不匹配");
         }
         let s = String::from_utf8_lossy(&buf[o + 2..o + 2 + len]).into_owned();
-        if (af == 4 || af == 6) && s.parse::<std::net::IpAddr>().is_ok() {
+        if (af == 4 || af == 6) && addr_str_valid(&s) {
             ips.push(s);
         }
         o += 2 + len;
@@ -302,5 +318,36 @@ mod tests {
         let (src, got) = decode_push_ip(&p).unwrap();
         assert_eq!(src, [3u8; 32]);
         assert_eq!(got, ips);
+    }
+
+    #[test]
+    fn ip_lists_support_port_suffixes() {
+        // 动态通告现已携带端口（[v6]:port / ip:port），编解码必须保留，不能误判 v6/误丢弃。
+        let ips = vec![
+            "127.0.0.1:1212".to_string(),
+            "240e:db8::1:1212".to_string(),
+            "1.2.3.4:5000".to_string(),
+            "2001:db8::2".to_string(),
+        ];
+        let buf = encode_ips(&ips);
+        let (got, off) = decode_ips(&buf, 0).unwrap();
+        assert_eq!(off, buf.len());
+        assert_eq!(got, ips);
+
+        // IP_CHANGED / GOSSIP / PUSH_IP 都走同一编解码，验证一次足够
+        let g = encode_gossip(&[[9u8; 32]], &ips);
+        let (_, got_ips) = decode_gossip(&g).unwrap();
+        assert_eq!(got_ips, ips);
+    }
+
+    #[test]
+    fn addr_answer_keeps_port_suffixes() {
+        let target = [7u8; 32];
+        let nonce = [8u8; 16];
+        let ips = vec!["1.2.3.4:9999".to_string(), "240e::1:1212".to_string()];
+        let buf = encode_addr_answer(&target, &nonce, &ips);
+        let a = decode_addr_answer(&buf).unwrap();
+        assert!(a.hit);
+        assert_eq!(a.ips, ips);
     }
 }
