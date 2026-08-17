@@ -181,10 +181,6 @@ fn top_bar(ui: &mut egui::Ui, app: &mut ChatApp) {
                 }
                 ui.add_space(8.0);
                 ui.label(RichText::new("KokonaChat").size(20.0).strong().color(ACCENT));
-                // 标题右侧直接显示当前 IP（不加分隔杠；IP 不可手动修改）
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(RichText::new(&app.local_ip).weak().size(13.0));
-                });
             });
         });
 }
@@ -831,15 +827,12 @@ fn mobile_top_bar(ui: &mut egui::Ui, app: &mut ChatApp) {
                         ui.label(RichText::new(&f.nickname).size(18.0).strong());
                     }
                 } else {
-                    // 主页：头像（点击进资料页）+ 标题 + 右侧 IP
+                    // 主页：头像（点击进资料页）+ 标题（IP 等数据都在个人资料页展示）
                     if avatar_button(ui, app, 36.0) {
                         app.show_profile = true;
                     }
                     ui.add_space(6.0);
                     ui.label(RichText::new("KokonaChat").size(20.0).strong().color(ACCENT));
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.label(RichText::new(&app.local_ip).weak().size(12.0));
-                    });
                 }
             });
         });
